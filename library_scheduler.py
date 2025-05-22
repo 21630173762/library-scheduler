@@ -53,29 +53,60 @@ def get_month_days(year, month):
 def arrange_month(shifts, students, schedules, year, month):
     days = get_month_days(year, month)
     student_count = {stu['student_id']: 0 for stu in students}
-    shift_assign_map = {}
     result = []
+    
+    # 为前台班创建固定班次与学生的映射
+    front_desk_assignments = {}
+    library_assignments = {}
+    
+    # 按照日期和班次整理
     for d in days:
         for shift in shifts:
             shift_day, shift_time = parse_shift(shift['班次'])
             if shift_day != d['weekday']:
                 continue
+            
             start, end = shift_time.split('-')
             assigned = []
             shift_key = shift['班次']
-            preferred = shift_assign_map.get(shift_key)
-            candidates = students.copy()
-            if preferred:
-                candidates = [stu for stu in students if stu['student_id'] == preferred] + [stu for stu in students if stu['student_id'] != preferred]
-            for stu in sorted(candidates, key=lambda x: student_count[x['student_id']]):
-                busy = schedules.get(stu['student_id'], [])
-                if is_free(busy, shift_day, start, end):
-                    assigned.append(stu['name'])
-                    student_count[stu['student_id']] += 1
-                    if shift_key not in shift_assign_map:
-                        shift_assign_map[shift_key] = stu['student_id']
+            
+            # 确定使用哪个映射表
+            assignment_map = front_desk_assignments if shift.get('类型', '') == '前台班' else library_assignments
+            
+            # 如果此班次已有固定学生，优先选择他们
+            preferred_students = assignment_map.get(shift_key, [])
+            candidates = []
+            
+            # 先尝试使用已分配的固定学生
+            for student_id in preferred_students:
+                for stu in students:
+                    if stu['student_id'] == student_id:
+                        busy = schedules.get(stu['student_id'], [])
+                        if is_free(busy, shift_day, start, end):
+                            assigned.append(stu['name'])
+                            student_count[stu['student_id']] += 1
+                            if len(assigned) == shift['需求人数']:
+                                break
+            
+            # 如果固定学生不够或不可用，寻找新学生
+            if len(assigned) < shift['需求人数']:
+                # 按照工作量排序学生
+                for stu in sorted([s for s in students if s['student_id'] not in [id for id in preferred_students if id in [s['student_id'] for s in students]]], 
+                                 key=lambda x: student_count[x['student_id']]):
                     if len(assigned) == shift['需求人数']:
                         break
+                    
+                    busy = schedules.get(stu['student_id'], [])
+                    if is_free(busy, shift_day, start, end):
+                        assigned.append(stu['name'])
+                        student_count[stu['student_id']] += 1
+                        
+                        # 记录这个学生为这个班次的固定学生（如果没有已分配）
+                        if shift_key in assignment_map and stu['student_id'] not in assignment_map[shift_key]:
+                            assignment_map[shift_key].append(stu['student_id'])
+                        elif shift_key not in assignment_map:
+                            assignment_map[shift_key] = [stu['student_id']]
+            
             result.append({
                 '日期': d['date'].strftime('%Y-%m-%d'),
                 'weekday': d['weekday'],
@@ -83,6 +114,7 @@ def arrange_month(shifts, students, schedules, year, month):
                 '学生': ','.join(assigned) if assigned else '/',
                 '类型': shift.get('类型', '未知')  # 添加班次类型
             })
+    
     return result
 
 def group_days_by_week(days):
