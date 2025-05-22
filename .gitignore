@@ -1,0 +1,11 @@
+# Python字节码文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 排班结果文件
+*月排班表.xlsx
+
+# 系统生成文件
+.DS_Store
+Thumbs.db 

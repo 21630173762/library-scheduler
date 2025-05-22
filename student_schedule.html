@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>学生课表生成器</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        .header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 8px;
+        }
+        .header label, .header input {
+            margin-right: 10px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .section-header {
+            background-color: #e0e0e0;
+            color: #333;
+            font-weight: bold;
+            text-align: center;
+            padding: 5px;
+            margin-top: 15px;
+            grid-column: 1 / -1;
+        }
+        .cell {
+            width: 80px;
+            height: 30px;
+            background-color: white;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent; /* 移除移动端点击高亮 */
+        }
+        .busy {
+            background-color: #ffb3b3;
+        }
+        button {
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        /* 移动端样式优化 */
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .header { justify-content: center; }
+            
+            table { font-size: 14px; }
+            th, td { padding: 6px 2px; }
+            
+            .cell {
+                width: auto;
+                height: auto;
+                min-height: 36px; /* 增大触摸区域 */
+            }
+            
+            h1 { font-size: 20px; text-align: center; }
+            
+            /* 确保表格每列都有足够的宽度 */
+            th:first-child, td:first-child { min-width: 70px; }
+            th:not(:first-child), td:not(:first-child) { min-width: 30px; }
+        }
+    </style>
+</head>
+<body>
+    <h1>学生课表生成器</h1>
+    
+    <div class="header">
+        <label for="name">姓名:</label>
+        <input type="text" id="name" size="10">
+        <label for="student_id">学号:</label>
+        <input type="text" id="student_id" size="15">
+        <button onclick="exportJSON()">导出课表JSON</button>
+    </div>
+    
+    <table id="schedule">
+        <tr>
+            <th>时间/星期</th>
+            <th>周一</th>
+            <th>周二</th>
+            <th>周三</th>
+            <th>周四</th>
+            <th>周五</th>
+            <th>周六</th>
+            <th>周日</th>
+        </tr>
+        <!-- 表格内容将由 JavaScript 动态生成 -->
+    </table>
+    
+    <script>
+        // 全局变量
+        const PERIODS = [
+            {label: "8:30-10:15", times: ["8:30", "9:20", "9:25", "10:15"], section: "上午"},
+            {label: "10:25-12:10", times: ["10:25", "11:15", "11:20", "12:10"]},
+            {label: "14:00-15:45", times: ["14:00", "14:50", "14:55", "15:45"], section: "下午"},
+            {label: "16:00-17:45", times: ["16:00", "16:50", "16:55", "17:45"]},
+            {label: "18:45-19:35", times: ["18:45", "19:35"], section: "晚上"},
+            {label: "19:40-20:30", times: ["19:40", "20:30"]},
+            {label: "20:35-21:25", times: ["20:35", "21:25"]}
+        ];
+        
+        const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+        let busyCells = new Set(); // 记录被标记为"有课"的单元格
+        
+        // 初始化表格
+        function initializeTable() {
+            const table = document.getElementById('schedule');
+            
+            for (let i = 0; i < PERIODS.length; i++) {
+                // 添加区域标题行（上午/下午/晚上）
+                if (PERIODS[i].section) {
+                    const sectionRow = document.createElement('tr');
+                    const sectionCell = document.createElement('td');
+                    sectionCell.textContent = PERIODS[i].section;
+                    sectionCell.colSpan = 8;
+                    sectionCell.style.backgroundColor = '#e0e0e0';
+                    sectionCell.style.fontWeight = 'bold';
+                    sectionRow.appendChild(sectionCell);
+                    table.appendChild(sectionRow);
+                }
+                
+                // 添加时间段行
+                const row = document.createElement('tr');
+                
+                // 添加时间标签
+                const timeCell = document.createElement('td');
+                timeCell.textContent = PERIODS[i].label;
+                row.appendChild(timeCell);
+                
+                // 添加每天的单元格
+                for (let j = 0; j < 7; j++) {
+                    const cell = document.createElement('td');
+                    cell.className = 'cell';
+                    cell.dataset.row = i;
+                    cell.dataset.col = j;
+                    
+                    // 使用触摸事件和点击事件
+                    cell.addEventListener('touchstart', function(e) {
+                        e.preventDefault(); // 防止默认行为
+                        toggleCell(this);
+                    });
+                    
+                    cell.addEventListener('click', function(e) {
+                        toggleCell(this);
+                    });
+                    
+                    row.appendChild(cell);
+                }
+                
+                table.appendChild(row);
+            }
+        }
+        
+        // 切换单元格状态（有课/无课）
+        function toggleCell(cell) {
+            const row = cell.dataset.row;
+            const col = cell.dataset.col;
+            const key = `${row},${col}`;
+            
+            if (busyCells.has(key)) {
+                busyCells.delete(key);
+                cell.classList.remove('busy');
+            } else {
+                busyCells.add(key);
+                cell.classList.add('busy');
+            }
+        }
+        
+        // 导出JSON
+        function exportJSON() {
+            const name = document.getElementById('name').value.trim();
+            const studentId = document.getElementById('student_id').value.trim();
+            
+            if (!name || !studentId) {
+                alert('请填写姓名和学号！');
+                return;
+            }
+            
+            // 构建busy数组
+            const busy = [];
+            for (const key of busyCells) {
+                const [i, j] = key.split(',').map(Number);
+                const period = PERIODS[i];
+                const weekday = WEEKDAYS[j];
+                
+                // 大课（前4行）拆分为两节小课
+                if (i < 4) {
+                    busy.push({day: weekday, start: period.times[0], end: period.times[1]});
+                    busy.push({day: weekday, start: period.times[2], end: period.times[3]});
+                } else {
+                    busy.push({day: weekday, start: period.times[0], end: period.times[1]});
+                }
+            }
+            
+            // 构建JSON对象
+            const data = {
+                name: name,
+                student_id: studentId,
+                busy: busy
+            };
+            
+            // 格式化JSON字符串
+            let jsonContent = '{\n';
+            jsonContent += `  "name": "${name}",\n`;
+            jsonContent += `  "student_id": "${studentId}",\n`;
+            jsonContent += '  "busy": [\n';
+            
+            // 按照要求格式化busy数组
+            for (let i = 0; i < busy.length; i++) {
+                const item = busy[i];
+                jsonContent += `    {"day": "${item.day}", "start": "${item.start}", "end": "${item.end}"}`;
+                if (i < busy.length - 1) {
+                    jsonContent += ',';
+                }
+                jsonContent += '\n';
+            }
+            
+            jsonContent += '  ]\n';
+            jsonContent += '}';
+            
+            // 移动端保存文件
+            if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                // 移动端显示JSON内容，让用户手动复制
+                const pre = document.createElement('pre');
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.backgroundColor = '#f5f5f5';
+                pre.style.padding = '10px';
+                pre.style.border = '1px solid #ddd';
+                pre.style.maxHeight = '300px';
+                pre.style.overflow = 'auto';
+                pre.textContent = jsonContent;
+                
+                const modal = document.createElement('div');
+                modal.style.position = 'fixed';
+                modal.style.top = '0';
+                modal.style.left = '0';
+                modal.style.width = '100%';
+                modal.style.height = '100%';
+                modal.style.backgroundColor = 'rgba(0,0,0,0.7)';
+                modal.style.zIndex = '1000';
+                modal.style.display = 'flex';
+                modal.style.flexDirection = 'column';
+                modal.style.padding = '20px';
+                
+                const title = document.createElement('h3');
+                title.textContent = '请复制以下内容并保存为JSON文件';
+                title.style.color = 'white';
+                
+                const closeBtn = document.createElement('button');
+                closeBtn.textContent = '关闭';
+                closeBtn.style.marginTop = '15px';
+                closeBtn.onclick = function() {
+                    document.body.removeChild(modal);
+                };
+                
+                modal.appendChild(title);
+                modal.appendChild(pre);
+                modal.appendChild(closeBtn);
+                document.body.appendChild(modal);
+            } else {
+                // 桌面端直接下载
+                const blob = new Blob([jsonContent], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${studentId}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        }
+        
+        // 页面加载完成后初始化表格
+        window.onload = initializeTable;
+    </script>
+</body>
+</html>
